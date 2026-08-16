@@ -10,9 +10,9 @@ them with prompt fragments from your database.
 
 | Node | Category | Purpose |
 |---|---|---|
-| **Prompt Database** | `text` | Single prompt editor with category/prompt selection |
-| **Prompt Stack** | `text` | Stack multiple prompts from different categories into one output |
-| **LoRa Loader with Trigger DB** | `loaders` | LoRa loader with persistent trigger word storage |
+| **Prompt Database** | `nulldxx` | Single prompt editor with category/prompt selection |
+| **Prompt Stack** | `nulldxx` | Stack multiple prompts from different categories into one output |
+| **LoRa Loader with Trigger DB** | `nulldxx` | LoRa loader with persistent trigger word storage |
 
 All data lives in `user/default/user-db/` inside your ComfyUI directory — `prompts.json` for the
 prompt nodes and `lora-triggers.json` for the LoRa loader.
@@ -49,7 +49,7 @@ prompt nodes and `lora-triggers.json` for the LoRa loader.
 
 ### Usage
 
-1. Add the "Prompt Database" node from the "text" category
+1. Add the "Prompt Database" node from the "nulldxx" category
 2. Select a category from the first dropdown menu
 3. Select a prompt name from the second dropdown menu
 4. The prompt text will automatically load in the text area
@@ -82,7 +82,7 @@ string. This is useful for building complex prompt chains or modular prompt temp
 - **Automatic Restoration**: When loading a saved workflow, all prompt entries and their selections are restored, and dropdowns are updated to reflect the current database.
 
 ### Usage
-1. Add the **Prompt Stack** node from the "text" category in ComfyUI.
+1. Add the **Prompt Stack** node from the "nulldxx" category in ComfyUI.
 2. For each prompt entry:
    - Toggle the enabled checkbox to include/exclude the prompt.
    - Select a category from the dropdown (populated from your database).
@@ -134,7 +134,7 @@ LoRa loader with Trigger DB being used to apply triggers as part of a combinatio
 
 ### Usage
 
-1. Add the "LoRa Loader with Trigger DB" node from the "loaders" category
+1. Add the "LoRa Loader with Trigger DB" node from the "nulldxx" category
 2. Select a LoRa from the dropdown - triggers auto-load if fields are empty
 3. Use "All Triggers" for comprehensive trigger words, "Active Triggers" for current selection
 4. Click "📥 Load Triggers" to load saved data or "💾 Save Triggers" to save current data

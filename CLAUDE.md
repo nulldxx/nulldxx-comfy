@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A ComfyUI custom node pack combining prompt database management with LoRa trigger word storage. It
 provides three nodes:
 
-- **PromptDB** ("Prompt Database", category `text`) — single prompt editor backed by a category/prompt JSON database
-- **PromptStack** ("Prompt Stack", category `text`) — stacks multiple database prompts into one output string
-- **LoRaLoaderWithTriggerDB** ("LoRa Loader with Trigger DB", category `loaders`) — loads a LoRa and persists its trigger words
+- **PromptDB** ("Prompt Database", category `nulldxx`) — single prompt editor backed by a category/prompt JSON database
+- **PromptStack** ("Prompt Stack", category `nulldxx`) — stacks multiple database prompts into one output string
+- **LoRaLoaderWithTriggerDB** ("LoRa Loader with Trigger DB", category `nulldxx`) — loads a LoRa and persists its trigger words
 
 The pack was formed by merging two previously separate repositories (`comfy-prompt-db` and
 `comfy-lora-loader-with-triggerdb`). Node IDs and display names were preserved from both, so
@@ -242,7 +242,7 @@ beyond a syntax check.
 
 1. Install (or symlink) the pack in ComfyUI's `custom_nodes` directory
 2. Restart ComfyUI server
-3. Verify all three nodes appear: "Prompt Database" and "Prompt Stack" under *text*, "LoRa Loader with Trigger DB" under *loaders*
+3. Verify all three nodes appear under a single *nulldxx* folder in the node menu: "Prompt Database", "Prompt Stack" and "LoRa Loader with Trigger DB"
 4. **Prompt Database**: dropdowns populate, selecting a prompt loads its text, 💾 Save writes to `prompts.json`
 5. **Prompt Stack**: ➕ adds entries, preview updates, entries restore after a workflow reload
 6. **LoRa Loader**: LoRa dropdown populates; buttons appear (📥 Load Triggers, 🔍 Load Metadata, 💾 Save Triggers); auto-loading works when switching LoRas; `lora-triggers.json` is created; metadata extraction works for files with embedded trigger words

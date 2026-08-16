@@ -102,7 +102,7 @@ class PromptStack:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("stacked_prompts",)
     FUNCTION = "stack_prompts"
-    CATEGORY = "text"
+    CATEGORY = "nulldxx"
     
     def stack_prompts(self, separator=", ", preview_text="", **kwargs):
         stacked_prompts = []

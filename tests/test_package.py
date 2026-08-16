@@ -52,12 +52,11 @@ def test_function_attribute_names_a_real_method(node_id):
     assert callable(getattr(cls, cls.FUNCTION, None))
 
 
-@pytest.mark.parametrize(
-    "node_id, category",
-    [("PromptDB", "text"), ("PromptStack", "text"), ("LoRaLoaderWithTriggerDB", "loaders")],
-)
-def test_nodes_appear_in_the_documented_category(node_id, category):
-    assert nulldxx_comfy.NODE_CLASS_MAPPINGS[node_id].CATEGORY == category
+@pytest.mark.parametrize("node_id", sorted(nulldxx_comfy.NODE_CLASS_MAPPINGS))
+def test_nodes_appear_in_the_packs_own_menu_folder(node_id):
+    category = nulldxx_comfy.NODE_CLASS_MAPPINGS[node_id].CATEGORY
+
+    assert category == "nulldxx" or category.startswith("nulldxx/")
 
 
 def test_web_directory_is_declared():

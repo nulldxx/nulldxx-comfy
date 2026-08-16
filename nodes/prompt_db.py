@@ -123,7 +123,7 @@ class PromptDB:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("prompt_text",)
     FUNCTION = "get_prompt"
-    CATEGORY = "text"
+    CATEGORY = "nulldxx"
     
     def get_prompt(self, category="", prompt_name="", prompt_text=""):
         """Return the prompt text"""

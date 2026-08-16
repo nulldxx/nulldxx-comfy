@@ -145,7 +145,7 @@ class LoRaLoaderWithTriggerDB:
     RETURN_TYPES = ("MODEL", "STRING", "STRING")
     RETURN_NAMES = ("model", "all_triggers", "active_triggers")
     FUNCTION = "load_lora"
-    CATEGORY = "loaders"
+    CATEGORY = "nulldxx"
     
     def get_lora_base_name(self, lora_name):
         """Get the base name of the LoRa file (without extension), normalized for cross-platform compatibility"""
