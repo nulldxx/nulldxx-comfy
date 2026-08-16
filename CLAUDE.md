@@ -194,15 +194,51 @@ schema has always been two levels of plain string mapping.
 
 ## Testing the Nodes
 
-Since these are ComfyUI custom nodes, testing requires a running ComfyUI instance. Outside ComfyUI
-only syntax checks are possible — `folder_paths`, `comfy.sd` and `server` don't exist:
+### Automated tests
 
 ```bash
-python -m compileall -q nodes common __init__.py
+pip install -r requirements-dev.txt
+pytest tests/          # must be invoked with the tests/ path, see below
 node --check web/prompt_db.js
 ```
 
-In ComfyUI:
+`.github/workflows/tests.yml` runs the same on every push and pull request, across Python
+3.10–3.13, plus a `node --check` of every file in `web/`.
+
+**Layout:**
+
+```
+tests/
+  pytest.ini           # config lives HERE, not in pyproject.toml (see below)
+  comfy_stubs.py       # ComfyUI stand-ins + package loader + assertion helpers
+  conftest.py          # fixtures only (comfy_root, user_db, loras_dir, routes)
+  test_file_id.py      # content-sampling hash
+  test_user_db.py      # ComfyUI root resolution and its four fallbacks
+  test_prompt_db.py    # PromptDB node + /prompt_db_* routes
+  test_prompt_stack.py # AnyType, FlexibleOptionalInputType, stack_prompts()
+  test_lora_triggerdb.py # trigger extraction/cleaning, DB migration, file_id lookup
+  test_package.py      # node registration, route registration, flat web/ dir
+```
+
+**How the harness works** — `tests/comfy_stubs.py` installs fake `folder_paths`, `comfy.sd`,
+`comfy.utils` and `server` modules into `sys.modules`, then loads the repo under the alias
+`nulldxx_comfy` (the directory name has a hyphen, so it isn't importable directly). The `server`
+stub's `routes.post()` decorator records handlers instead of registering them, so route handlers
+can be invoked directly via `call_route()`. The `comfy_root` fixture points the stub at a tmp
+directory, so the real `get_user_db_path()` runs and the databases land in throwaway files.
+
+**Two gotchas:**
+- Run `pytest tests/`, not bare `pytest`. The config is in `tests/pytest.ini` specifically so
+  pytest's rootdir is `tests/`. With the repo root as rootdir, pytest sees the root `__init__.py`,
+  treats the root as a package, and fails importing it (relative imports, no parent package).
+  Moving the config into `pyproject.toml` reintroduces this.
+- `tests/comfy_stubs.py` is deliberately not `conftest.py`, so it is imported exactly once as an
+  ordinary module and the stub state is never duplicated.
+
+What is *not* covered: real LoRa loading, aiohttp wire-level behaviour, and all the JavaScript
+beyond a syntax check.
+
+### Manual checks in ComfyUI
 
 1. Install (or symlink) the pack in ComfyUI's `custom_nodes` directory
 2. Restart ComfyUI server

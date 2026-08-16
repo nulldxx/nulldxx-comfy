@@ -1,0 +1,5 @@
+# Test-only dependencies. ComfyUI installs nothing from this file.
+pytest>=7.4
+aiohttp>=3.9
+# Optional at runtime; without it the safetensors metadata test skips.
+safetensors>=0.4
