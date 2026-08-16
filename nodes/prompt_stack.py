@@ -69,14 +69,26 @@ class PromptStack:
                 with open(prompts_file, 'r', encoding='utf-8') as f:
                     prompts_db = json.load(f)
                     categories = list(prompts_db.keys())
-                    
-                    # Get ALL prompt names from ALL categories for validation
+
+                    # Get ALL prompt names from ALL categories for validation.
+                    # Sorted, because set iteration order varies between
+                    # processes and would reshuffle the dropdown - and with it
+                    # the declared default - on every ComfyUI restart.
                     prompt_names_set = set()
                     for category in categories:
                         category_prompts = prompts_db.get(category, {})
                         prompt_names_set.update(category_prompts.keys())
-                    prompt_names = list(prompt_names_set)
-                        
+                    prompt_names = sorted(prompt_names_set)
+
+                    # The default has to be a prompt that exists in the default
+                    # category, or a freshly added node resolves to nothing.
+                    if categories:
+                        first_category_prompts = list(prompts_db.get(categories[0], {}).keys())
+                        if first_category_prompts and first_category_prompts[0] in prompt_names:
+                            default_prompt = first_category_prompts[0]
+                            prompt_names.remove(default_prompt)
+                            prompt_names.insert(0, default_prompt)
+
         except Exception as e:
             print(f"Error loading categories for PromptStack INPUT_TYPES: {e}")
         
@@ -107,14 +119,19 @@ class PromptStack:
     def stack_prompts(self, separator=", ", preview_text="", **kwargs):
         stacked_prompts = []
         prompts_db = {}
+        db_error = None
         if os.path.exists(self.prompts_file):
             try:
                 with open(self.prompts_file, 'r', encoding='utf-8') as f:
                     prompts_db = json.load(f)
-            except (json.JSONDecodeError, Exception) as e:
-                pass
+            except Exception as e:
+                # Do not swallow this: with an empty database every lookup
+                # below returns "" and the workflow would quietly generate
+                # against no prompt at all.
+                db_error = e
+                print(f"[PromptStack] Error reading {self.prompts_file}: {e}")
         else:
-            pass
+            print(f"[PromptStack] Prompt database not found: {self.prompts_file}")
 
         # Find all prompt entries by scanning for keys like prompt_N_category
         prompt_indices = set()
@@ -125,17 +142,27 @@ class PromptStack:
                     prompt_indices.add(idx)
                 except Exception:
                     continue
+        enabled_entries = 0
         for idx in sorted(prompt_indices):
             cat = kwargs.get(f'prompt_{idx}_category', None)
             name = kwargs.get(f'prompt_{idx}_name', None)
             enabled = kwargs.get(f'prompt_{idx}_enabled', True)
             if enabled and cat and name:
+                enabled_entries += 1
                 prompt_text = prompts_db.get(cat, {}).get(name, "")
                 if prompt_text:
                     stacked_prompts.append(prompt_text)
                 else:
-                    pass
-            else:
-                pass
+                    print(f"[PromptStack] Entry {idx}: no text for '{name}' in category '{cat}'")
+
+        # An unreadable database plus entries to resolve means the output is
+        # wrong rather than empty by choice - fail visibly in the UI instead of
+        # handing the sampler a blank prompt.
+        if db_error is not None and enabled_entries:
+            raise RuntimeError(
+                f"PromptStack could not read the prompt database "
+                f"({self.prompts_file}): {db_error}"
+            )
+
         result = separator.join(stacked_prompts)
         return (result,)

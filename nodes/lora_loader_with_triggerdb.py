@@ -7,14 +7,42 @@ import comfy.utils
 from aiohttp import web
 import server
 from ..common.file_id import get_file_id_safe
+from ..common.json_store import write_json_atomic
 from ..common.user_db import get_user_db_path
+
+LORA_EXTENSIONS = (".safetensors", ".pt", ".bin")
+
+
+def tags_from_frequency_dict(val):
+    """
+    Turn a tag-frequency mapping into a list of tags.
+
+    Kohya writes ss_tag_frequency as {dataset_dir: {tag: count}}, so taking the
+    top-level keys yields dataset folder names ("10_ohwx man", "1_images")
+    rather than trigger words. Flatten that nested form, summing the counts, and
+    return the tags most-used first. Other tools write a flat {tag: count},
+    which is used as-is.
+    """
+    nested = [v for v in val.values() if isinstance(v, dict)]
+    if not nested or len(nested) != len(val):
+        return list(val.keys())
+
+    counts = {}
+    for inner in nested:
+        for tag, count in inner.items():
+            try:
+                counts[tag] = counts.get(tag, 0) + int(count)
+            except (TypeError, ValueError):
+                counts.setdefault(tag, 0)
+    # sorted() is stable, so equally-frequent tags keep their original order
+    return [tag for tag, _ in sorted(counts.items(), key=lambda kv: -kv[1])]
 
 
 def extract_triggers_from_metadata(meta):
     """Extract trigger words from LoRa metadata"""
     if not isinstance(meta, dict):
         return []
-    
+
     # Try common keys used by Kohya and others
     for key in ["ss_tag_frequency", "ss_tag_strings", "trained_words", "trigger_words"]:
         if key in meta:
@@ -26,11 +54,10 @@ def extract_triggers_from_metadata(meta):
                 except Exception:
                     val = [v.strip() for v in val.split(",")]
             if isinstance(val, dict):
-                # Kohya's ss_tag_frequency is a dict of word:count
-                return list(val.keys())
+                return tags_from_frequency_dict(val)
             if isinstance(val, list):
                 return [str(v) for v in val]
-    
+
     # Try to find any key with "trigger" or "word" in it
     for k, v in meta.items():
         if "trigger" in k or "word" in k:
@@ -40,10 +67,23 @@ def extract_triggers_from_metadata(meta):
                 except Exception:
                     v = [vv.strip() for vv in v.split(",")]
             if isinstance(v, dict):
-                return list(v.keys())
+                return tags_from_frequency_dict(v)
             if isinstance(v, list):
                 return [str(x) for x in v]
     return []
+
+
+def resolve_lora_path(db_key):
+    """
+    Resolve a database key (a LoRa path with no extension) back to a file.
+
+    Returns the full path, or None if no LoRa with that key exists any more.
+    """
+    for ext in LORA_EXTENSIONS:
+        test_path = folder_paths.get_full_path("loras", db_key + ext)
+        if test_path and os.path.isfile(test_path):
+            return test_path
+    return None
 
 def clean_trigger_word(word):
     """Clean trigger word by removing leading numbers and underscores"""
@@ -72,7 +112,7 @@ def build_file_id_to_key_map(triggers_db):
 
 def read_lora_metadata(lora_path):
     """Read metadata from LoRa file"""
-    if not os.path.isfile(lora_path):
+    if not lora_path or not os.path.isfile(lora_path):
         return {}
     
     ext = os.path.splitext(lora_path)[1].lower()
@@ -101,7 +141,10 @@ def read_lora_metadata(lora_path):
             # Read PyTorch metadata
             try:
                 import torch
-                data = torch.load(lora_path, map_location="cpu")
+                # weights_only: a .pt/.bin LoRa is arbitrary user-supplied
+                # data, and unpickling it would run whatever code it carries.
+                # Metadata is plain strings and numbers, so this loses nothing.
+                data = torch.load(lora_path, map_location="cpu", weights_only=True)
                 if "metadata" in data:
                     meta = data["metadata"]
                 elif "meta" in data:
@@ -184,9 +227,11 @@ class LoRaLoaderWithTriggerDB:
             return (model, all_triggers, active_triggers)
         
         # Load LoRa
+        # get_full_path returns None when the LoRa has been renamed or deleted
+        # since the workflow was saved, and os.path.isfile(None) raises.
         lora_path = folder_paths.get_full_path("loras", lora_name)
         lora = None
-        if os.path.isfile(lora_path):
+        if lora_path and os.path.isfile(lora_path):
             lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
         
         if lora is None:
@@ -238,15 +283,8 @@ async def load_lora_triggers(request):
 
             # Check if entry needs a file_id
             if isinstance(entry_data, dict) and "file_id" not in entry_data:
-                # Try to find the LoRa file
                 # db_key is the normalized path without extension
-                possible_exts = [".safetensors", ".pt", ".bin"]
-                found_path = None
-                for ext in possible_exts:
-                    test_path = folder_paths.get_full_path("loras", db_key + ext)
-                    if test_path and os.path.isfile(test_path):
-                        found_path = test_path
-                        break
+                found_path = resolve_lora_path(db_key)
 
                 if found_path:
                     # File exists - calculate file_id
@@ -266,8 +304,7 @@ async def load_lora_triggers(request):
         # Save migrated database if needed
         if db_modified:
             try:
-                with open(triggers_file, 'w', encoding='utf-8') as f:
-                    json.dump(triggers_db, f, indent=2, ensure_ascii=False)
+                write_json_atomic(triggers_file, triggers_db)
                 print(f"[MIGRATION] Updated triggers database with file_ids")
             except Exception as e:
                 print(f"Error saving migrated triggers.json: {e}")
@@ -288,18 +325,29 @@ async def load_lora_triggers(request):
         found_by = None
         path_needs_update = False
         if current_file_id:
+            instance = LoRaLoaderWithTriggerDB()
+            current_normalized_path = instance.get_lora_base_name(lora_name)
             file_id_map = build_file_id_to_key_map(triggers_db)
             print(f"[DEBUG] File ID map has {len(file_id_map)} entries")
-            if current_file_id in file_id_map:
+
+            if current_normalized_path in triggers_db:
+                # An entry keyed by this exact path always wins. Two copies of
+                # the same LoRa share a file_id, so trusting the id here would
+                # hand this LoRa the other copy's triggers.
+                db_key = current_normalized_path
+                lora_data = triggers_db[db_key]
+                found_by = "path"
+                print(f"Loaded triggers by path: {lora_name}")
+            elif current_file_id in file_id_map:
                 old_db_key = file_id_map[current_file_id]
                 lora_data = triggers_db[old_db_key]
                 found_by = "file_id"
                 print(f"Loaded triggers by file_id: {current_file_id[:8]}... -> {old_db_key}")
 
-                # Check if the path has changed (file was moved)
-                instance = LoRaLoaderWithTriggerDB()
-                current_normalized_path = instance.get_lora_base_name(lora_name)
-                if old_db_key != current_normalized_path:
+                # Only re-key when the old path really is gone. If that file
+                # still exists this is a duplicate, not a move, and rewriting
+                # the key would delete the other copy's entry.
+                if old_db_key != current_normalized_path and resolve_lora_path(old_db_key) is None:
                     print(f"[PATH UPDATE] LoRa moved: {old_db_key} -> {current_normalized_path}")
                     # Update the database key to the new path
                     db_key = current_normalized_path
@@ -336,8 +384,7 @@ async def load_lora_triggers(request):
         # Save database if path was updated
         if path_needs_update:
             try:
-                with open(triggers_file, 'w', encoding='utf-8') as f:
-                    json.dump(triggers_db, f, indent=2, ensure_ascii=False)
+                write_json_atomic(triggers_file, triggers_db)
                 print(f"[PATH UPDATE] Saved database with updated path")
             except Exception as e:
                 print(f"Error saving updated path: {e}")
@@ -406,9 +453,7 @@ async def save_lora_triggers(request):
 
             # Save to file
             try:
-                os.makedirs(os.path.dirname(triggers_file), exist_ok=True)
-                with open(triggers_file, 'w', encoding='utf-8') as f:
-                    json.dump(triggers_db, f, indent=2, ensure_ascii=False)
+                write_json_atomic(triggers_file, triggers_db)
 
                 file_id_msg = f" (file_id: {file_id})" if file_id else ""
                 print(f"Saved triggers for {lora_base_name}{file_id_msg}: all='{all_triggers}', active='{active_triggers}'")
@@ -437,8 +482,8 @@ async def load_lora_metadata(request):
         
         # Get full path to LoRa file
         lora_path = folder_paths.get_full_path("loras", lora_name)
-        
-        if not os.path.isfile(lora_path):
+
+        if not lora_path or not os.path.isfile(lora_path):
             return web.json_response({"success": False, "message": f"LoRa file not found: {lora_name}"})
         
         # Read metadata from LoRa file

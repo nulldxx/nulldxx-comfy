@@ -22,7 +22,9 @@ def get_comfy_path():
             # Go up from models/checkpoints to the root
             checkpoint_path = checkpoint_paths[0]
             if "models" in checkpoint_path:
-                return checkpoint_path.split("models")[0].rstrip(os.sep)
+                # rsplit: an install can itself live under a directory called
+                # "models", and only the last occurrence is the models folder.
+                return checkpoint_path.rsplit("models", 1)[0].rstrip(os.sep)
 
         # Method 3: Use output folder path
         output_paths = folder_paths.get_folder_paths("output")
@@ -30,7 +32,7 @@ def get_comfy_path():
             # Go up from output to the root
             output_path = output_paths[0]
             if "output" in output_path:
-                return output_path.split("output")[0].rstrip(os.sep)
+                return output_path.rsplit("output", 1)[0].rstrip(os.sep)
 
         # Method 4: Use current working directory as fallback
         return os.getcwd()

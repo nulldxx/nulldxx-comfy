@@ -3,6 +3,7 @@ import json
 from aiohttp import web
 import server
 from ..common.user_db import get_user_db_path
+from ..common.json_store import write_json_atomic
 
 # DRY: Define default prompts once at module level
 DEFAULT_PROMPTS = {
@@ -256,10 +257,8 @@ async def save_prompt_text(request):
         
         # Save to file
         try:
-            os.makedirs(os.path.dirname(prompts_file), exist_ok=True)
-            with open(prompts_file, 'w', encoding='utf-8') as f:
-                json.dump(prompts_db, f, indent=2, ensure_ascii=False)
-            
+            write_json_atomic(prompts_file, prompts_db)
+
             return web.json_response({"success": True, "message": f"Saved prompt '{prompt_name}'"})
             
         except Exception as e:
@@ -305,10 +304,8 @@ async def create_new_prompt(request):
         
         # Save to file
         try:
-            os.makedirs(os.path.dirname(prompts_file), exist_ok=True)
-            with open(prompts_file, 'w', encoding='utf-8') as f:
-                json.dump(prompts_db, f, indent=2, ensure_ascii=False)
-            
+            write_json_atomic(prompts_file, prompts_db)
+
             if is_new_category:
                 message = f"Created new category '{category}' and added prompt '{prompt_name}'"
             else:

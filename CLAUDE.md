@@ -27,6 +27,7 @@ nodes/
 common/
   user_db.py                         # get_comfy_path(), get_user_db_path() — shared by all nodes
   file_id.py                         # get_file_id(), get_file_id_safe()
+  json_store.py                      # write_json_atomic() — every database save goes through this
 web/                                 # FLAT — the JS imports "../../scripts/app.js"; nesting breaks it
   prompt_db.js
   prompt_stack.js
@@ -52,7 +53,7 @@ back to the loras folder (the LoRa loader's legacy location) if the user-db dire
 
 **`nodes/prompt_stack.py`**:
 - `AnyType` / `FlexibleOptionalInputType`: allow an arbitrary number of dynamically added widgets (`prompt_N_category`, `prompt_N_name`, `prompt_N_enabled`)
-- `PromptStack.stack_prompts()`: scans `**kwargs` for `prompt_N_category` keys, resolves each enabled entry against `prompts.json`, and joins the results with `separator`
+- `PromptStack.stack_prompts()`: scans `**kwargs` for `prompt_N_category` keys, resolves each enabled entry against `prompts.json`, and joins the results with `separator`. If the database cannot be read and there is at least one enabled entry it raises, rather than handing the sampler a silently empty prompt
 
 **API Endpoints** (`nodes/prompt_db.py`, served via ComfyUI's aiohttp server):
 - `/prompt_db_categories` (POST): list categories
@@ -64,6 +65,18 @@ back to the loras folder (the LoRa loader's legacy location) if the user-db dire
 **JavaScript** (`web/prompt_db.js`, `web/prompt_stack.js`): register extensions `PromptDB` and
 `PromptStack`, hook `beforeRegisterNodeDef`, and keep dropdowns in sync with the database. Prompt
 Stack also handles add/remove of entries and restoring them from a saved workflow.
+
+Three things in `web/prompt_stack.js` are load-bearing and easy to undo by accident:
+
+- **Entry numbers are allocated as `max + 1` and compacted after a removal.** ComfyUI maps widgets to
+  node inputs by name, so two widgets called `prompt_3_category` collapse into one and an entry
+  disappears from the generated prompt. Never derive the next number from a count.
+- **Widgets are identified by `w.name` or by the `_promptStackEntry` / `_promptStackControl` tags,
+  never by `w.label`.** `addWidget(type, name, ...)` stores that caption as `name`; `label` is only
+  set from `options.label`, so a filter on `label` silently matches nothing.
+- **Entries are persisted in `node.properties.promptStack_entries`** (plus a legacy top-level copy
+  read back for older workflows). `properties` is part of the node schema, so it survives workflow
+  normalisation; `onSerialize(o)` must write into `o` because LiteGraph discards its return value.
 
 ### LoRa loader
 
@@ -129,8 +142,12 @@ schema has always been two levels of plain string mapping.
 ```
 
 **Lookup Strategy**:
-1. **File ID-based lookup (primary)**: If the LoRa file has a `file_id` in the database, lookup uses content-based matching (survives file moves/renames)
-   - **Path correction**: If found by file_id but the path has changed (file was moved), the database key is automatically updated to the new path
+0. **Exact path match wins**: two copies of the same LoRa share a `file_id`, so an entry keyed by the
+   current path is always used in preference to a content match
+1. **File ID-based lookup**: If the LoRa file has a `file_id` in the database, lookup uses content-based matching (survives file moves/renames)
+   - **Path correction**: If found by file_id but the path has changed, the database key is updated
+     to the new path — but only once the old path is confirmed gone. If that file still exists this
+     is a duplicate rather than a move, and re-keying would delete the other copy's entry
 2. **Path-based lookup (fallback)**: If no `file_id` is found, falls back to path matching with cross-platform normalization
 3. **Auto-migration on save**: When triggers are saved, `file_id` is automatically added to the entry
 4. **Global auto-migration on load**: When ANY LoRa is loaded, scans the entire database and upgrades ALL entries missing file_ids:
@@ -171,8 +188,11 @@ schema has always been two levels of plain string mapping.
 ### Metadata Extraction
 - Supports `.safetensors` (preferred), `.pt`, and `.bin` formats
 - Uses `safetensors.torch.safe_open()` for safetensors files
-- Falls back to `torch.load()` for PyTorch checkpoint files
+- Falls back to `torch.load(..., weights_only=True)` for PyTorch checkpoint files — a `.pt`/`.bin`
+  LoRa is user-supplied data, and unpickling it would run whatever code it carries
 - Looks for common metadata keys used by Kohya and other training tools
+- Kohya's `ss_tag_frequency` is nested (`{dataset_dir: {tag: count}}`); `tags_from_frequency_dict()`
+  flattens it, or the extracted "triggers" are dataset folder names
 - Cleans extracted words (removes dataset artifacts like `1_girl` → `girl`)
 
 ### Path Handling
@@ -181,6 +201,12 @@ schema has always been two levels of plain string mapping.
 - Always normalize paths with forward slashes for database keys
 - Handle subfolders properly (LoRa files can be in nested directories)
 - Never re-implement user-db path resolution — import `get_user_db_path` from `common/user_db.py`
+- `folder_paths.get_full_path()` returns `None` when a file has been renamed or deleted since the
+  workflow was saved, and `os.path.isfile(None)` raises `TypeError` — always guard the result
+
+### Saving a database
+- Write with `write_json_atomic()` from `common/json_store.py`, never `open(path, 'w')` — a reader
+  (a queued PromptStack execution, another tab) can otherwise parse a half-written file
 
 ### File ID Generation
 - Import with `from ..common.file_id import get_file_id, get_file_id_safe`
@@ -213,6 +239,7 @@ tests/
   comfy_stubs.py       # ComfyUI stand-ins + package loader + assertion helpers
   conftest.py          # fixtures only (comfy_root, user_db, loras_dir, routes)
   test_file_id.py      # content-sampling hash
+  test_json_store.py   # atomic JSON writes
   test_user_db.py      # ComfyUI root resolution and its four fallbacks
   test_prompt_db.py    # PromptDB node + /prompt_db_* routes
   test_prompt_stack.py # AnyType, FlexibleOptionalInputType, stack_prompts()

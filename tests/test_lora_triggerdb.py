@@ -22,6 +22,28 @@ def triggers_file(user_db):
 # extract_triggers_from_metadata
 # --------------------------------------------------------------------------
 
+def test_extracts_from_nested_kohya_tag_frequency():
+    """Kohya nests the counts under the dataset folder: {dir: {tag: count}}.
+
+    Taking the top-level keys yields folder names, never trigger words.
+    """
+    meta = {
+        "ss_tag_frequency": {
+            "10_ohwx man": {"ohwx man": 40, "smile": 12},
+            "1_extra": {"smile": 3, "hat": 1},
+        }
+    }
+
+    # Most frequent first, counts summed across datasets
+    assert extract_triggers_from_metadata(meta) == ["ohwx man", "smile", "hat"]
+
+
+def test_nested_tag_frequency_survives_uncountable_values():
+    meta = {"ss_tag_frequency": {"dataset": {"wizard": "lots", "staff": 2}}}
+
+    assert sorted(extract_triggers_from_metadata(meta)) == ["staff", "wizard"]
+
+
 def test_extracts_from_kohya_tag_frequency_dict():
     meta = {"ss_tag_frequency": {"1girl": 40, "smile": 12}}
 
@@ -239,6 +261,17 @@ def test_zero_strength_skips_loading(comfy_root):
 
     assert result == ("MODEL", "all", "active")
     assert len(comfy.sd.calls) == before
+
+
+def test_load_of_a_deleted_lora_fails_gracefully(comfy_root, loras_dir):
+    """get_full_path returns None once the file is gone; isfile(None) raises."""
+    node = LoRaLoaderWithTriggerDB()
+    comfy.sd.calls.clear()
+
+    result = node.load_lora("MODEL", "renamed-since-saving.safetensors", 1.0, "a", "b")
+
+    assert result == ("MODEL", "a", "b")
+    assert comfy.sd.calls == []
 
 
 def test_lora_is_applied_to_the_model_only(comfy_root, loras_dir):
@@ -541,6 +574,43 @@ def test_load_rewrites_the_key_of_a_moved_lora(comfy_root, loras_dir, triggers_f
     assert db["flux/new-home/my-lora"]["all_triggers"] == "one"
 
 
+def test_load_keeps_duplicate_copies_apart(comfy_root, loras_dir, triggers_file, routes):
+    """Two copies of one LoRa share a file_id; neither may absorb the other."""
+    original = make_lora_file(loras_dir, "flux/a.safetensors", b"same bytes")
+    make_lora_file(loras_dir, "flux/b.safetensors", b"same bytes")
+    shared_id = get_file_id(original)
+    write_json(
+        triggers_file,
+        {
+            "flux/a": {"all_triggers": "a-triggers", "active_triggers": "", "file_id": shared_id},
+            "flux/b": {"all_triggers": "b-triggers", "active_triggers": "", "file_id": shared_id},
+        },
+    )
+
+    _status, body = call_route(routes["/lora_triggers"], {"lora_name": "flux/a.safetensors"})
+
+    assert body["all_triggers"] == "a-triggers"
+    db = read_json(triggers_file)
+    assert db["flux/a"]["all_triggers"] == "a-triggers"
+    assert db["flux/b"]["all_triggers"] == "b-triggers"
+
+
+def test_load_does_not_rekey_when_the_other_copy_still_exists(
+    comfy_root, loras_dir, triggers_file, routes
+):
+    """Only one copy is in the database, but both files are on disk."""
+    original = make_lora_file(loras_dir, "flux/a.safetensors", b"same bytes")
+    make_lora_file(loras_dir, "flux/b.safetensors", b"same bytes")
+    write_json(
+        triggers_file,
+        {"flux/b": {"all_triggers": "b-triggers", "active_triggers": "", "file_id": get_file_id(original)}},
+    )
+
+    call_route(routes["/lora_triggers"], {"lora_name": "flux/a.safetensors"})
+
+    assert list(read_json(triggers_file)) == ["flux/b"]
+
+
 def test_load_of_a_renamed_lora_finds_it_by_content(comfy_root, loras_dir, triggers_file, routes):
     renamed = make_lora_file(loras_dir, "better-name.safetensors", b"same bytes")
     write_json(
@@ -663,6 +733,15 @@ def test_metadata_route_cleans_and_deduplicates(comfy_root, loras_dir, routes, m
     assert body["success"] is True
     assert body["all_triggers"] == "girl, smile"       # deduplicated, 'img' filtered
     assert body["active_triggers"] == body["all_triggers"]
+
+
+def test_metadata_route_reports_a_missing_file(comfy_root, routes):
+    """get_full_path returns None, which must not become a 500."""
+    status, body = call_route(routes["/lora_metadata"], {"lora_name": "gone.safetensors"})
+
+    assert status == 200
+    assert body["success"] is False
+    assert "not found" in body["message"]
 
 
 def test_metadata_route_reports_failure_when_everything_is_filtered_out(

@@ -11,10 +11,8 @@ from nulldxx_comfy.common.user_db import get_comfy_path, get_user_db_path
 def clean_tmp_path(tmp_path_factory):
     """A tmp dir whose full path contains neither "models" nor "output".
 
-    Methods 2 and 3 of get_comfy_path() derive the root with a plain
-    `path.split("models")` / `path.split("output")`, so an install living under
-    a directory containing either word resolves wrongly. The default `tmp_path`
-    is named after the test, which trips this by accident.
+    Methods 2 and 3 of get_comfy_path() derive the root by splitting the path on
+    those words, so a tmp dir named after the test can trip them by accident.
     """
     return tmp_path_factory.mktemp("root")
 
@@ -42,6 +40,21 @@ def test_user_db_path_is_idempotent(comfy_root):
 def test_falls_back_to_checkpoints_folder(monkeypatch, clean_tmp_path):
     """Method 2: derive the root from the checkpoints folder when base_path is absent."""
     root = clean_tmp_path / "Comfy"
+    monkeypatch.delattr(folder_paths, "base_path")
+    monkeypatch.setattr(
+        folder_paths,
+        "get_folder_paths",
+        lambda name: [str(root / "models" / "checkpoints")] if name == "checkpoints" else [],
+    )
+
+    assert get_comfy_path() == str(root)
+
+
+def test_checkpoints_fallback_handles_a_root_under_a_models_directory(
+    monkeypatch, clean_tmp_path
+):
+    """An install can itself live under a directory called "models"."""
+    root = clean_tmp_path / "models" / "Comfy"
     monkeypatch.delattr(folder_paths, "base_path")
     monkeypatch.setattr(
         folder_paths,

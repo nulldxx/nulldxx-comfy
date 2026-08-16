@@ -88,6 +88,39 @@ def test_input_types_declares_the_first_entry(comfy_root, prompts_file):
     assert optional["prompt_1_enabled"][1]["default"] is True
 
 
+def test_input_types_orders_prompt_names_deterministically(comfy_root, prompts_file):
+    """Set iteration order varies per process; the dropdown must not."""
+    write_json(
+        prompts_file,
+        {
+            "poses": {"sitting": "person sitting"},
+            "styles": {"cinematic": "lighting", "artistic": "style", "bold": "bold"},
+        },
+    )
+
+    prompt_names = PromptStack.INPUT_TYPES()["optional"]["prompt_1_name"][0]
+
+    # The first category's first prompt leads, the rest are sorted.
+    assert prompt_names == ["sitting", "artistic", "bold", "cinematic"]
+
+
+def test_input_types_defaults_to_a_prompt_in_the_default_category(comfy_root, prompts_file):
+    """Otherwise a freshly added node resolves to nothing at all."""
+    write_json(
+        prompts_file,
+        {
+            "poses": {"sitting": "person sitting"},
+            "styles": {"aaa-sorts-first": "lighting"},
+        },
+    )
+
+    optional = PromptStack.INPUT_TYPES()["optional"]
+    default_category = optional["prompt_1_category"][1]["default"]
+    default_prompt = optional["prompt_1_name"][1]["default"]
+
+    assert default_prompt in read_json(prompts_file)[default_category]
+
+
 def test_input_types_falls_back_when_the_database_is_empty(comfy_root, prompts_file):
     write_json(prompts_file, {})
 
@@ -250,13 +283,25 @@ def test_missing_database_yields_an_empty_string(comfy_root):
     assert result == ("",)
 
 
-def test_corrupt_database_yields_an_empty_string(comfy_root, prompts_file):
+def test_corrupt_database_raises_rather_than_emitting_nothing(comfy_root, prompts_file):
+    """A blank prompt would generate a wrong image without saying so."""
+    prompts_file.parent.mkdir(parents=True, exist_ok=True)
+    prompts_file.write_text("{not json", encoding="utf-8")
+    node = PromptStack()
+
+    with pytest.raises(RuntimeError, match="could not read the prompt database"):
+        node.stack_prompts(
+            prompt_1_category="poses", prompt_1_name="sitting", prompt_1_enabled=True
+        )
+
+
+def test_corrupt_database_with_nothing_enabled_is_not_an_error(comfy_root, prompts_file):
     prompts_file.parent.mkdir(parents=True, exist_ok=True)
     prompts_file.write_text("{not json", encoding="utf-8")
     node = PromptStack()
 
     result = node.stack_prompts(
-        prompt_1_category="poses", prompt_1_name="sitting", prompt_1_enabled=True
+        prompt_1_category="poses", prompt_1_name="sitting", prompt_1_enabled=False
     )
 
     assert result == ("",)
