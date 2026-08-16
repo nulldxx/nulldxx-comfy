@@ -1,0 +1,13 @@
+[project]
+name = "nulldxx-comfy"
+description = "Prompt database and LoRa trigger-word nodes for ComfyUI"
+version = "1.0.0"
+license = { file = "LICENSE" }
+
+[project.urls]
+Repository = "https://github.com/nulldxx/nulldxx-comfy"
+
+[tool.comfy]
+PublisherId = "nulldxx"
+DisplayName = "nulldxx ComfyUI Nodes"
+Icon = ""
